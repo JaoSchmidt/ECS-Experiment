@@ -19,6 +19,7 @@
 namespace reg
 {
 
+// TODO: need to check const tuple later
 template <typename... Components> struct ChunkView {
   std::tuple<Components *...> arrays = {};
   std::vector<reg::Entity> &entities;
@@ -391,6 +392,11 @@ public:
       }
     }
   }
+
+#ifndef NDEBUG
+  /** Mostly for debugging purposes, you probably shouldn't need this info */
+  const std::vector<Record> &getRecords() const { return m_records; }
+#endif
 
 private:
   static constexpr std::string_view bitmaskWarning =
