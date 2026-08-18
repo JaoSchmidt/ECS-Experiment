@@ -13,5 +13,10 @@ target_include_directories(
 set_target_properties(${LIBRARY_NAME} PROPERTIES CXX_STANDARD 20
                                                  CXX_STANDARD_REQUIRED ON)
 target_compile_features(${LIBRARY_NAME} INTERFACE cxx_std_20)
-target_compile_options(${LIBRARY_NAME} INTERFACE -g -std=c++20 -Wall -Wextra
-                                                 -fdiagnostics-color=always)
+# Compiler-specific options
+if(MSVC AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+  target_compile_options(${TARGET_NAME} PRIVATE /W4 /std:c++20 /Zi)
+  set_target_properties(${TARGET_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
+else()
+  target_compile_options(${TARGET_NAME} PRIVATE -g -std=c++20 -Wall -Wextra)
+endif()
