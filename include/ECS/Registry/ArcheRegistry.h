@@ -414,21 +414,11 @@ private:
   template <ECSComponent... Components>
   static constexpr Bitmask getMultipleBitmask()
   {
-    if constexpr (hasAllBitmask<Components...>()) {
-      return ComponentManagerT::template multiComponentBitmask<Components...>();
-    }
-    std::cout << bitmaskWarning << std::endl;
-    std::terminate();
-    return Bitmask{-1};
+    return ComponentManagerT::template multiComponentBitmask<Components...>();
   }
   template <ECSComponent Component> static constexpr Bitmask getSingleBitmask()
   {
-    if constexpr (hasBitmask<Component>()) {
-      return ComponentManagerT::template singleComponentBitmask<Component>();
-    }
-    std::cout << bitmaskWarning << std::endl;
-    std::terminate();
-    return Bitmask{-1};
+    return ComponentManagerT::template singleComponentBitmask<Component>();
   }
   template <ECSComponent... Component> static constexpr bool hasAllBitmask()
   {

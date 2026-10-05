@@ -4,7 +4,6 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-
 #pragma once
 
 #include "spdlog/fmt/bundled/base.h"
@@ -36,6 +35,7 @@ struct EntityTag {
 struct ColumnTag {
 };
 
+// TODO: you can use std::bitset instead of std::int32_t, bah
 using Bitmask = StrongType<std::int32_t, BitmaskTag>;
 using Entity = StrongType<std::int32_t, EntityTag>;
 using Column = StrongType<std::int32_t, ColumnTag>;
