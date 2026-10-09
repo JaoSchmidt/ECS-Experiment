@@ -32,16 +32,16 @@ struct BitmaskTag {
 };
 struct EntityTag {
 };
-struct ColumnTag {
+struct RowTag {
 };
 
 // TODO: you can use std::bitset instead of std::int32_t, bah
 using Bitmask = StrongType<std::int32_t, BitmaskTag>;
 using Entity = StrongType<std::int32_t, EntityTag>;
-using Column = StrongType<std::int32_t, ColumnTag>;
+using Row = StrongType<std::int32_t, RowTag>;
 struct Record {
   Bitmask bitmask;
-  Column column;
+  Row row;
 };
 // ---------------------------------------------------- //
 // Bitmask operations on "Bitmask"
@@ -78,8 +78,8 @@ template <> struct hash<reg::Bitmask> {
   }
 };
 
-template <> struct hash<reg::Column> {
-  size_t operator()(const reg::Column &c) const noexcept
+template <> struct hash<reg::Row> {
+  size_t operator()(const reg::Row &c) const noexcept
   {
     return std::hash<std::int32_t>()(c.value);
   }

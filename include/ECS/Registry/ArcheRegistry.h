@@ -57,7 +57,7 @@ public:
     reg::Entity id;
     if (m_availableEntities.empty()) {
       id = reg::Entity(++numberOfEntities);
-      addRecord(archetype, Column{-1});
+      addRecord(archetype, Row{-1});
     } else {
       id = m_availableEntities.front();
       m_availableEntities.pop();
@@ -83,13 +83,13 @@ public:
              "component of old archetype");
     Archetype &archetype =
         m_archetypes[bitMask]; // this will create an empty map
-    Column column =
+    Row row =
         archetype.pushComponents(entity, std::forward<Components>(comps)...);
 
-    updateRecord(entity, bitMask, column);
+    updateRecord(entity, bitMask, row);
 
     return std::tie<Components &...>(
-        archetype.fetchComponent<Components>(column)...);
+        archetype.fetchComponent<Components>(row)...);
   }
 
   // use this in case you want to create a single component for an entity, not
@@ -103,11 +103,11 @@ public:
              "Component reset isn't implemented yet. TODO: need to remove "
              "component of old archetype");
     Archetype &archetype = m_archetypes[bitMask];
-    size_t column =
+    size_t row =
         archetype.pushComponent<Component>(std::forward<Component>(args));
-    updateRecord(entity, bitMask, column);
+    updateRecord(entity, bitMask, row);
 
-    return archetype.fetchComponent<Component>(column);
+    return archetype.fetchComponent<Component>(row);
   }
 
   // ---------------------------------------------------- //
@@ -123,16 +123,16 @@ public:
                                             Components &&...comps)
   {
     Bitmask oldBitmask = m_records[static_cast<unsigned>(entity)].bitmask;
-    int oldColumn = m_records[static_cast<unsigned>(entity)].column;
+    int oldRow = m_records[static_cast<unsigned>(entity)].row;
     Bitmask newBitMask = getMultipleBitmask<Components...>();
     Archetype &archetype = m_archetypes[oldBitmask];
     Archetype &newArchetype = m_archetypes[newBitMask];
 
-    Column newColumn =
+    Row newRow =
         moveEntity<Components...>(archetype, newArchetype, entity, newBitMask,
-                                  oldColumn, std::forward(comps)...);
+                                  oldRow, std::forward(comps)...);
     return std::tie<Components &...>(
-        newArchetype.fetchComponent<Components>(newColumn)...);
+        newArchetype.fetchComponent<Components>(newRow)...);
   }
 
   /// Assuming bitmask is known, you can manually push components into the
@@ -141,9 +141,9 @@ public:
   void manualPush(Entity entity, Bitmask bitmask, C &&comps)
   {
     Archetype &archetype = m_archetypes[bitmask];
-    Column column = m_records[static_cast<unsigned long>(entity)].column;
-    if (column == -1) {
-      m_records[static_cast<unsigned long>(entity)].column =
+    Row row = m_records[static_cast<unsigned long>(entity)].row;
+    if (row == -1) {
+      m_records[static_cast<unsigned long>(entity)].row =
           archetype.pushComponents(entity, std::forward<C>(comps));
     } else {
       archetype.pushComponents(std::forward<C>(comps));
@@ -152,19 +152,19 @@ public:
 
 private:
   template <ECSComponent... Components>
-  Column moveEntity(Archetype &from, Archetype &to, Entity entity,
-                    Bitmask newBitMask, Column oldColumn, Components &&...comps)
+  Row moveEntity(Archetype &from, Archetype &to, Entity entity,
+                 Bitmask newBitMask, Row oldRow, Components &&...comps)
   {
     std::tuple<Components &...> oldComponents =
-        from.extractColumn<Components...>(oldColumn);
+        from.extractRow<Components...>(oldRow);
 
-    Column newColumnIndex;
+    Row newRowIndex;
     // add old ones
     std::apply(
         [&](auto &...oldComps) {
-          newColumnIndex = (to.pushComponent<std::decay_t<decltype(oldComps)>>(
-                                std::move(oldComps)),
-                            ...);
+          newRowIndex = (to.pushComponent<std::decay_t<decltype(oldComps)>>(
+                             std::move(oldComps)),
+                         ...);
         },
         oldComponents);
 
@@ -172,9 +172,9 @@ private:
     (..., to.pushComponent<Components>(std::forward<Components>(comps)));
 
     m_records[static_cast<unsigned>(entity)].bitmask = newBitMask;
-    m_records[static_cast<unsigned>(entity)].column = newColumnIndex;
-    from.remove<Components...>(oldColumn);
-    return newColumnIndex;
+    m_records[static_cast<unsigned>(entity)].row = newRowIndex;
+    from.remove<Components...>(oldRow);
+    return newRowIndex;
   }
 
 public:
@@ -267,8 +267,8 @@ public:
              "Entity {} does not have all components requested", entity);
     Archetype &archetype =
         m_archetypes[m_records[static_cast<unsigned>(entity)].bitmask];
-    return archetype.extractColumn<TargetComponents...>(
-        m_records[static_cast<unsigned>(entity)].column);
+    return archetype.extractRow<TargetComponents...>(
+        m_records[static_cast<unsigned>(entity)].row);
   }
   template <ECSComponent... TargetComponents>
   const std::tuple<TargetComponents &...> getComponents(Entity entity) const
@@ -278,22 +278,22 @@ public:
                   "the CompileTimeBitMask");
     const Archetype &archetype =
         m_archetypes.at(m_records[static_cast<unsigned>(entity)].bitmask);
-    return archetype.extractColumn<TargetComponents...>(
-        m_records[static_cast<unsigned>(entity)].column);
+    return archetype.extractRow<TargetComponents...>(
+        m_records[static_cast<unsigned>(entity)].row);
   }
   template <ECSComponent T> T &getComponent(Entity entity)
   {
     Archetype &archetype =
         m_archetypes.at(m_records[static_cast<unsigned>(entity)].bitmask);
     return archetype.fetchComponent<T>(
-        m_records[static_cast<unsigned>(entity)].column);
+        m_records[static_cast<unsigned>(entity)].row);
   }
   template <ECSComponent T> const T &getComponent(Entity entity) const
   {
     const Archetype &archetype =
         m_archetypes.at(m_records[static_cast<unsigned>(entity)].bitmask);
     return archetype.fetchComponent<T>(
-        m_records[static_cast<unsigned>(entity)].column);
+        m_records[static_cast<unsigned>(entity)].row);
   }
 
   // ==================================================== //
@@ -333,13 +333,13 @@ public:
              "Record couldn't find entity {}", entity);
     // internally: update swapped entity's record, turn removed record invalid
     Bitmask targetBitMask = m_records[static_cast<unsigned>(entity)].bitmask;
-    Column targetColumn = m_records[static_cast<unsigned>(entity)].column;
+    Row targetRow = m_records[static_cast<unsigned>(entity)].row;
     Archetype &archetype = m_archetypes.at(targetBitMask);
 
-    auto [lastEntityColumn, swappedEntity] = archetype.remove(targetColumn);
+    auto [lastEntityRow, swappedEntity] = archetype.remove(targetRow);
     removeEntity(entity);
     m_records[static_cast<unsigned>(swappedEntity)] = {targetBitMask,
-                                                       targetColumn};
+                                                       targetRow};
   }
   template <ECSComponent... ObjectComponents>
   void removeBatch(std::span<Entity> entities)
@@ -348,14 +348,13 @@ public:
     struct RecordHash {
       std::size_t operator()(const Record &r) const noexcept
       {
-        return std::hash<Bitmask>()(r.bitmask) ^
-               (std::hash<Column>()(r.column) << 1);
+        return std::hash<Bitmask>()(r.bitmask) ^ (std::hash<Row>()(r.row) << 1);
       }
     };
     struct RecordEq {
       bool operator()(const Record &a, const Record &b) const noexcept
       {
-        return a.bitmask == b.bitmask && a.column == b.column;
+        return a.bitmask == b.bitmask && a.row == b.row;
       }
     };
 
@@ -369,24 +368,23 @@ public:
     // NOTE: for high remove batches, it may be faster to cache
     for (auto &target : entities) {
       Bitmask &bitmask = m_records[target].bitmask;
-      Column &column = m_records[target].column;
+      Row &row = m_records[target].row;
       Archetype &archetype = m_archetypes.at(bitmask);
-      replacedMap.emplace(bitmask,
-                          archetype.remove<ObjectComponents...>(column));
+      replacedMap.emplace(bitmask, archetype.remove<ObjectComponents...>(row));
       bitmask = Bitmask{-1};
-      column = Column{-1};
+      row = Row{-1};
     }
-    // update remaining records columns
+    // update remaining records rows
     std::size_t updated = 0;
     for (Record &record : m_records) {
       // NOTE: there is a possibility that it will find the some invalid record,
       // in this case, we need to test it to make sure that is the correct
       // behaviour
 
-      P_ASSERT(record.bitmask != Bitmask{-1} && record.column != Column{-1},
+      P_ASSERT(record.bitmask != Bitmask{-1} && record.row != Row{-1},
                "The debug begins");
       if (auto it = replacedMap.find(record); it != replacedMap.end()) {
-        record.column = it->second;
+        record.row = it->second;
         if (++updated == replacedMap.size())
           break;
       }
@@ -433,27 +431,27 @@ private:
   void removeEntity(Entity entity)
   {
     m_records[static_cast<unsigned>(entity)].bitmask = Bitmask{-1};
-    m_records[static_cast<unsigned>(entity)].column = Column{-1};
+    m_records[static_cast<unsigned>(entity)].row = Row{-1};
     m_availableEntities.push(entity);
   }
 
   // Record related
-  void addRecord(Bitmask bitmask, Column column)
+  void addRecord(Bitmask bitmask, Row row)
   {
-    m_records.emplace_back(bitmask, column);
+    m_records.emplace_back(bitmask, row);
   }
-  void addRecord(Bitmask bitmask, size_t column)
+  void addRecord(Bitmask bitmask, size_t row)
   {
-    m_records.emplace_back(bitmask, Column{static_cast<int32_t>(column)});
+    m_records.emplace_back(bitmask, Row{static_cast<int32_t>(row)});
   }
-  void updateRecord(Entity entity, Bitmask bitmask, Column column)
+  void updateRecord(Entity entity, Bitmask bitmask, Row row)
   {
-    m_records[static_cast<unsigned>(entity)] = {bitmask, column};
+    m_records[static_cast<unsigned>(entity)] = {bitmask, row};
   }
-  void updateRecord(Entity entity, Bitmask bitmask, size_t column)
+  void updateRecord(Entity entity, Bitmask bitmask, size_t row)
   {
-    m_records[static_cast<unsigned>(entity)] = {
-        bitmask, Column{static_cast<int32_t>(column)}};
+    m_records[static_cast<unsigned>(entity)] = {bitmask,
+                                                Row{static_cast<int32_t>(row)}};
   }
 };
 } // namespace reg
