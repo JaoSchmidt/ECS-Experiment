@@ -1,4 +1,6 @@
 #pragma once
+#include "Bitmask.h"
+#include "Entity.h"
 #include "SparseSet.h"
 //
 // A SimpleView is a basic implementation of a view, allowing iteration based
@@ -12,23 +14,26 @@
 namespace reg
 {
 
-template <typename... Components> class View
+template <ECSComponent... Components> class View
 {
   using ForEachFunc = std::function<void(Components &...)>;
   using ForEachFuncWithEntity = std::function<void(Entity, Components &...)>;
 
 public:
-  SimpleView(ECS *ecs)
-      : m_view_pools{ecs->get_component_pool_ptr<Components>()...}
+  View(const std::vector<Bitmask> &records,
+       std::array<SparseSet *, sizeof...(Components)> &&arr,
+       Bitmask excludeBitMask)
+      : m_viewPools{std::move(arr)}, m_records(records),
+        m_excludeBitMask(excludeBitMask)
   {
-    SEECS_ASSERT(ComponentTypes::size == m_view_pools.size(),
+    SEECS_ASSERT(sizeof...(Components) == m_viewPools.size(),
                  "Component type list and pool array size mismatch");
 
     auto smallest_pool = std::min_element(
-        m_view_pools.begin(), m_view_pools.end(),
+        m_viewPools.begin(), m_viewPools.end(),
         [](SparseSet *a, SparseSet *b) { return a->size() < b->size(); });
 
-    SEECS_ASSERT(smallest_pool != m_view_pools.end(),
+    SEECS_ASSERT(smallest_pool != m_viewPools.end(),
                  "Initializing invalid/empty view");
 
     m_smallest = *smallest_pool;
@@ -51,7 +56,8 @@ private:
   // Stores component pools associated with the view via their component index
   // from ComponentTypes
   std::array<SparseSet *, sizeof...(Components)> m_viewPools;
-
+  const std::vector<Bitmask> &m_records;
+  Bitmask m_excludeBitMask = Bitmask{-1};
   //
   // Pointer to the smallest component pool that we use as our basis for
   // iteration
@@ -66,21 +72,15 @@ private:
   //
   // Returns true iff all the pools in the view contain the given EntityIndex
   //
-  bool all_contain(Entity entity)
+  bool allContain(Entity entity)
   {
     return std::all_of(
         m_viewPools.begin(), m_viewPools.end(),
-        [entity](SparseSet *pool) { return pool->contains_index(entity); });
+        [entity](SparseSet *pool) { return pool->containsIndex(entity); });
   }
-  bool not_excluded(Entity entity_index)
+  bool IsExcluded(Entity entity)
   {
-    if (m_excluded_pools.empty())
-      return true;
-
-    return std::none_of(m_excluded_pools.begin(), m_excluded_pools.end(),
-                        [entity_index](SparseSet *pool) {
-                          return pool->contains_index(entity_index);
-                        });
+    return (m_records[entity] & m_excludeBitMask) != 0;
   }
 
   //
@@ -115,7 +115,7 @@ private:
     // Iterate smallest component pool and compare against other pools in view
     // Note this list is a COPY, allowing safe deletion during iteration.
     for (Entity entity : m_smallest->getEntities()) {
-      if (all_contain(entity)) {
+      if (allContain(entity)) {
         std::apply(func, componentTuple(entity, inds));
       }
     }
@@ -129,7 +129,7 @@ private:
     // Iterate smallest component pool and compare against other pools in view
     // Note this list is a COPY, allowing safe deletion during iteration.
     for (Entity entity : m_smallest->getEntities()) {
-      if (all_contain(entity) && not_excluded(entity)) {
+      if (allContain(entity) && !IsExcluded(entity)) {
         std::apply(func, std::tuple_cat(std::make_tuple(entity),
                                         componentTuple(entity, inds)));
       }

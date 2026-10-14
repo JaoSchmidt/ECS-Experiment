@@ -5,7 +5,9 @@
 #include "CoreFiles/LogWrapper.h"
 #endif
 #include "Entity.h"
+#include "ExcludeComponents.h"
 #include "SparseSet.h"
+#include "SparseView.h"
 #include <queue>
 
 namespace reg
@@ -181,10 +183,37 @@ public:
                                                       std::forward<C>(comp));
   }
 
-public:
   // ==================================================== //
   // iterate chunks
   // ==================================================== //
+private:
+  template <typename C> inline SparseSet *processComp()
+  {
+    return &m_sparseSets[getSingleBitmask<C>()];
+  }
+
+  template <typename... Cs, std::size_t... Is>
+  inline void createArr(std::array<SparseSet *, sizeof...(Cs)> &arr,
+                        std::index_sequence<Is...>)
+  {
+    ((arr[Is] = processComp<std::tuple_element_t<Is, std::tuple<Cs...>>>()),
+     ...);
+  }
+
+public:
+  template <ECSComponent... Components, ECSComponent... ExcludeComponents>
+  View<Components...> view(exclude_t<ExcludeComponents...> = {})
+  {
+    int excludeBitMask = getMultipleBitmask<ExcludeComponents...>();
+    // for each component, extract the target vectors of that component in each
+    // Archetype (SoA), then get its address (ChunkView)
+
+    constexpr auto indexes = std::index_sequence_for<Components...>{};
+    std::array<SparseSet *, sizeof...(Components)> arr;
+    createArr<Components...>(arr, indexes);
+
+    return View<Components...>(m_records, arr, excludeBitMask);
+  }
 
 public:
   // ==================================================== //

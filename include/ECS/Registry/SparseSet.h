@@ -163,7 +163,7 @@ public:
   //
   // Check if the EntityIndex currently has associated data in the dense list
   //
-  bool contains_index(Entity entity_index) const
+  bool containsIndex(Entity entity_index) const
   {
     return getDenseIndex(entity_index) != tombstone;
   }
