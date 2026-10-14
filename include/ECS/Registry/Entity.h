@@ -15,9 +15,11 @@ template <typename T, typename Tag> struct StrongType {
   T value;
 
   constexpr explicit StrongType(T v = {}) : value(v) {}
+  constexpr explicit StrongType(size_t v = {}) : value(static_cast<T>(v)) {}
 
   // Allow implicit conversion to T for internal use (optional)
   constexpr operator T() const noexcept { return value; }
+  constexpr size_t size_type() const { return static_cast<size_t>(value); }
 
   // Equality operators
   constexpr auto operator<=>(const StrongType &) const = default;

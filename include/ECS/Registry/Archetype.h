@@ -8,7 +8,7 @@
 
 #include "Core.h"
 #include "CoreFiles/LogWrapper.h"
-#include "ECS/Registry/Entity.h"
+#include "Entity.h"
 #include <exception>
 #include <typeindex>
 
@@ -22,12 +22,13 @@ class Archetype
 {
 public:
   using Deleter = void (*)(void *);
-  using ErasedVector = std::unique_ptr<void, Deleter>;
+  // AutoDeleteVector is unique_ptr, they delete themselves automatically
+  using AutoDeleteVector = std::unique_ptr<void, Deleter>;
   std::vector<std::function<Row(Row)>> m_removers;
   std::vector<reg::Entity> m_entities;
 
 private:
-  std::map<std::type_index, ErasedVector> m_componentMap;
+  std::map<std::type_index, AutoDeleteVector> m_componentMap;
 
 public:
   // ---------------------------------------------------- //
@@ -45,10 +46,10 @@ public:
       delete static_cast<std::vector<C> *>(vector);
     };
     m_removers.push_back(
-        [this](reg::Row row) { return removeFromComponent<C>(row); });
+        [this](Row row) { return removeFromComponent<C>(row); });
     auto [newIt, isInserted] =
         m_componentMap.emplace(std::type_index(typeid(C)),
-                               ErasedVector{new std::vector<C>(), deleter});
+                               AutoDeleteVector{new std::vector<C>(), deleter});
     P_ASSERT(isInserted, "Could not create new component vector");
     PLOG_I("New component bitmask added {}", typeid(C).name());
 

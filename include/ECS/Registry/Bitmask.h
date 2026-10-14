@@ -4,9 +4,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-
 #pragma once
-#include "ECS/Registry/Entity.h"
+#include "Entity.h"
 #include <cstddef>
 #include <type_traits>
 namespace reg

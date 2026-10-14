@@ -6,15 +6,13 @@
 
 #pragma once
 
-#include "CoreFiles/LogWrapper.h"
-#include "ECS/Registry/Archetype.h"
-#include "ECS/Registry/Bitmask.h"
-#include "ECS/Registry/ExcludeComponents.h"
+#include "Archetype.h"
+#include "Bitmask.h"
+#include "Concepts.h"
+#include "ExcludeComponents.h"
 
-#include <iostream>
 #include <queue>
 #include <span>
-#include <typeindex>
 
 namespace reg
 {
@@ -31,15 +29,6 @@ template <typename... Components> struct ChunkViewConst {
   size_t count;
 };
 
-template <typename... Ts>
-concept IsNoneType = (sizeof...(Ts) == 0);
-
-template <typename... Ts>
-concept IsSingleType = (sizeof...(Ts) == 1);
-
-template <typename... Ts>
-concept IsMultipleTypes = (sizeof...(Ts) > 1);
-
 template <typename ComponentManagerT>
   requires(is_compile_time_bitmask_v<ComponentManagerT>)
 class ArcheRegistry
@@ -54,13 +43,15 @@ public:
 
   Entity createEntity(Bitmask archetype = reg::Bitmask{-1})
   {
-    reg::Entity id;
+    Entity id = Entity{-1};
     if (m_availableEntities.empty()) {
       id = reg::Entity(++numberOfEntities);
       addRecord(archetype, Row{-1});
     } else {
       id = m_availableEntities.front();
       m_availableEntities.pop();
+      // we don't need to update records here bc they will be updated at
+      // createComponents fnc
     }
     return id;
   }
@@ -77,7 +68,7 @@ public:
                                                Components &&...comps)
   {
     Bitmask bitMask = getMultipleBitmask<Components...>();
-    P_ASSERT(m_records.at((size_t)entity).bitmask == bitMask ||
+    P_ASSERT(m_records.at(entity).bitmask == bitMask ||
                  m_records.at((size_t)entity).bitmask == -1,
              "Component reset isn't implemented yet. TODO: need to remove "
              "component of old archetype");
@@ -110,9 +101,9 @@ public:
     return archetype.fetchComponent<Component>(row);
   }
 
-  // ---------------------------------------------------- //
+  // ==================================================== //
   // add
-  // ---------------------------------------------------- //
+  // ==================================================== //
 
   // Expand the components of an entity, changing its "type". This is to make
   // the objects more flexible but can also be used as a feature of the engine.
@@ -122,8 +113,8 @@ public:
   std::tuple<Components &...> addComponents(Entity entity,
                                             Components &&...comps)
   {
-    Bitmask oldBitmask = m_records[static_cast<unsigned>(entity)].bitmask;
-    int oldRow = m_records[static_cast<unsigned>(entity)].row;
+    Bitmask oldBitmask = m_records[entity.size_type()].bitmask;
+    int oldRow = m_records[entity.size_type()].row;
     Bitmask newBitMask = getMultipleBitmask<Components...>();
     Archetype &archetype = m_archetypes[oldBitmask];
     Archetype &newArchetype = m_archetypes[newBitMask];
@@ -136,14 +127,14 @@ public:
   }
 
   /// Assuming bitmask is known, you can manually push components into the
-  /// archetype. Only use this for binding outside c++
+  /// archetype. Only use this for binding outside c++, like lua
   template <ECSComponent C>
   void manualPush(Entity entity, Bitmask bitmask, C &&comps)
   {
     Archetype &archetype = m_archetypes[bitmask];
-    Row row = m_records[static_cast<unsigned long>(entity)].row;
+    Row row = m_records[entity.size_type()].row;
     if (row == -1) {
-      m_records[static_cast<unsigned long>(entity)].row =
+      m_records[entity.size_type()].row =
           archetype.pushComponents(entity, std::forward<C>(comps));
     } else {
       archetype.pushComponents(std::forward<C>(comps));
@@ -158,7 +149,7 @@ private:
     std::tuple<Components &...> oldComponents =
         from.extractRow<Components...>(oldRow);
 
-    Row newRowIndex;
+    Row newRowIndex = Row{-1};
     // add old ones
     std::apply(
         [&](auto &...oldComps) {
@@ -261,39 +252,36 @@ public:
     static_assert(hasAllBitmask<TargetComponents...>(),
                   "When using getComponent some component didn't exist inside  "
                   "the CompileTimeBitMask");
-    const Bitmask b = m_records[static_cast<unsigned>(entity)].bitmask;
+    const Bitmask b = m_records[entity.size_type()].bitmask;
     P_ASSERT((b & getMultipleBitmask<TargetComponents...>()) ==
                  getMultipleBitmask<TargetComponents...>(),
              "Entity {} does not have all components requested", entity);
-    Archetype &archetype =
-        m_archetypes[m_records[static_cast<unsigned>(entity)].bitmask];
+    Archetype &archetype = m_archetypes[b];
     return archetype.extractRow<TargetComponents...>(
-        m_records[static_cast<unsigned>(entity)].row);
+        m_records[entity.size_type()].row);
   }
   template <ECSComponent... TargetComponents>
-  const std::tuple<TargetComponents &...> getComponents(Entity entity) const
+  std::tuple<const TargetComponents &...> getComponents(Entity entity) const
   {
     static_assert(hasAllBitmask<TargetComponents...>(),
                   "When using getComponent some component didn't exist inside "
                   "the CompileTimeBitMask");
     const Archetype &archetype =
-        m_archetypes.at(m_records[static_cast<unsigned>(entity)].bitmask);
+        m_archetypes.at(m_records[entity.size_type()].bitmask);
     return archetype.extractRow<TargetComponents...>(
-        m_records[static_cast<unsigned>(entity)].row);
+        m_records[entity.size_type()].row);
   }
   template <ECSComponent T> T &getComponent(Entity entity)
   {
     Archetype &archetype =
-        m_archetypes.at(m_records[static_cast<unsigned>(entity)].bitmask);
-    return archetype.fetchComponent<T>(
-        m_records[static_cast<unsigned>(entity)].row);
+        m_archetypes.at(m_records[entity.size_type()].bitmask);
+    return archetype.fetchComponent<T>(m_records[entity.size_type()].row);
   }
   template <ECSComponent T> const T &getComponent(Entity entity) const
   {
     const Archetype &archetype =
-        m_archetypes.at(m_records[static_cast<unsigned>(entity)].bitmask);
-    return archetype.fetchComponent<T>(
-        m_records[static_cast<unsigned>(entity)].row);
+        m_archetypes.at(m_records[entity.size_type()].bitmask);
+    return archetype.fetchComponent<T>(m_records[entity.size_type()].row);
   }
 
   // ==================================================== //
@@ -304,14 +292,14 @@ public:
   template <ECSComponent... ObjectComponents>
   constexpr bool containsAll(Entity entity) const
   {
-    Bitmask targetBitMask = m_records[static_cast<unsigned>(entity)].bitmask;
+    Bitmask targetBitMask = m_records[entity.size_type()].bitmask;
     int objectBitMask = getMultipleBitmask<ObjectComponents...>();
     return (targetBitMask | objectBitMask) == objectBitMask;
   }
   // Targeted has at least one component that a specific archetype also has
   template <ECSComponent... TargetComponents> bool hasAny(Entity entity) const
   {
-    Bitmask specificBitMask = m_records[static_cast<unsigned>(entity)].bitmask;
+    Bitmask specificBitMask = m_records[entity.size_type()].bitmask;
     if constexpr (sizeof...(TargetComponents) == 1) {
       int targetBitMask = getSingleBitmask<TargetComponents...>();
       return (targetBitMask & specificBitMask) != 0;
@@ -329,17 +317,16 @@ public:
   // update the last element's Record). If possible, prefer to batch
   void remove(Entity entity)
   {
-    P_ASSERT(m_records.size() > static_cast<unsigned>(entity),
+    P_ASSERT(m_records.size() > entity.size_type(),
              "Record couldn't find entity {}", entity);
     // internally: update swapped entity's record, turn removed record invalid
-    Bitmask targetBitMask = m_records[static_cast<unsigned>(entity)].bitmask;
-    Row targetRow = m_records[static_cast<unsigned>(entity)].row;
+    Bitmask targetBitMask = m_records[entity.size_type()].bitmask;
+    Row targetRow = m_records[entity.size_type()].row;
     Archetype &archetype = m_archetypes.at(targetBitMask);
 
     auto [lastEntityRow, swappedEntity] = archetype.remove(targetRow);
     removeEntity(entity);
-    m_records[static_cast<unsigned>(swappedEntity)] = {targetBitMask,
-                                                       targetRow};
+    m_records[static_cast<size_t>(swappedEntity)] = {targetBitMask, targetRow};
   }
   template <ECSComponent... ObjectComponents>
   void removeBatch(std::span<Entity> entities)
@@ -397,17 +384,6 @@ public:
 #endif
 
 private:
-  static constexpr std::string_view bitmaskWarning =
-      "You somehow reached a point where one of the requested components "
-      "on your engine doesn't exist in the compile time bitmask. This "
-      "should have been prevented with some static assertion on my part, "
-      "but I let you read this message in case you want to create more "
-      "flexible systems and components. For example: to statically check "
-      "only when the system is instantiated.\n\n How to statically check "
-      "yourself? just use something like:\n"
-      "requires(reg::CompileTimeBitMask::allRegistered<YourComponentsHere."
-      "..>()).\nIf you think this is an error, please check you have the "
-      "correct tags inside WorldComponents, UIComponents, etc";
   // Bitmask related
   template <ECSComponent... Components>
   static constexpr Bitmask getMultipleBitmask()
@@ -430,8 +406,8 @@ private:
   // remove
   void removeEntity(Entity entity)
   {
-    m_records[static_cast<unsigned>(entity)].bitmask = Bitmask{-1};
-    m_records[static_cast<unsigned>(entity)].row = Row{-1};
+    m_records[entity.size_type()].bitmask = Bitmask{-1};
+    m_records[entity.size_type()].row = Row{-1};
     m_availableEntities.push(entity);
   }
 
@@ -442,16 +418,15 @@ private:
   }
   void addRecord(Bitmask bitmask, size_t row)
   {
-    m_records.emplace_back(bitmask, Row{static_cast<int32_t>(row)});
+    m_records.emplace_back(bitmask, Row{row});
   }
   void updateRecord(Entity entity, Bitmask bitmask, Row row)
   {
-    m_records[static_cast<unsigned>(entity)] = {bitmask, row};
+    m_records[entity.size_type()] = {bitmask, row};
   }
   void updateRecord(Entity entity, Bitmask bitmask, size_t row)
   {
-    m_records[static_cast<unsigned>(entity)] = {bitmask,
-                                                Row{static_cast<int32_t>(row)}};
+    m_records[entity.size_type()] = {bitmask, Row{row}};
   }
 };
 } // namespace reg
