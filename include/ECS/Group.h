@@ -1,5 +1,5 @@
 #pragma once
-#include "Entity.h"
+#include "ECS/Entity.h"
 #include "SparseSet.h"
 #include <cstddef>
 #include <vector>

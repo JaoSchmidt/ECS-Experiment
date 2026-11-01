@@ -5,8 +5,8 @@
  */
 
 #pragma once
-#include "Concepts.h"
-#include "Entity.h"
+#include "ECS/Concepts.h"
+#include "ECS/Entity.h"
 #include <cstddef>
 #include <type_traits>
 namespace reg

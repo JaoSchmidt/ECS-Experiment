@@ -7,9 +7,9 @@
 #pragma once
 
 #include "Archetype.h"
-#include "Bitmask.h"
-#include "Concepts.h"
-#include "ExcludeComponents.h"
+#include "ECS/Bitmask.h"
+#include "ECS/Concepts.h"
+#include "ECS/ExcludeComponents.h"
 
 #include <queue>
 #include <span>

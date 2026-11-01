@@ -8,7 +8,7 @@
 
 #include "Core.h"
 #include "CoreFiles/LogWrapper.h"
-#include "Entity.h"
+#include "ECS/Entity.h"
 #include <exception>
 #include <typeindex>
 

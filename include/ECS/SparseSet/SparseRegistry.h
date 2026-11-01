@@ -1,11 +1,11 @@
 #pragma once
-#include "Bitmask.h"
+#include "ECS/Bitmask.h"
 #ifndef NDEBUG
 #include "Core.h"
 #include "CoreFiles/LogWrapper.h"
 #endif
-#include "Entity.h"
-#include "ExcludeComponents.h"
+#include "ECS/Entity.h"
+#include "ECS/ExcludeComponents.h"
 #include "SparseSet.h"
 #include "SparseView.h"
 #include <map>

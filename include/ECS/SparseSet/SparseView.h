@@ -1,6 +1,6 @@
 #pragma once
-#include "Concepts.h"
-#include "Entity.h"
+#include "ECS/Concepts.h"
+#include "ECS/Entity.h"
 #include "SparseSet.h"
 #include <algorithm>
 #include <type_traits>
@@ -38,9 +38,9 @@ public:
     P_ASSERT(sizeof...(Components) == m_viewPools.size(),
              "Component type list and pool array size mismatch");
 
-    auto smallest_pool = std::min_element(
-        m_viewPools.begin(), m_viewPools.end(),
-        [](auto a, auto b) { return a->size() < b->size(); });
+    auto smallest_pool =
+        std::min_element(m_viewPools.begin(), m_viewPools.end(),
+                         [](auto a, auto b) { return a->size() < b->size(); });
 
     m_smallest = *smallest_pool;
   }
@@ -108,8 +108,8 @@ private:
   {
     using RawTuple = std::tuple<Components...>;
     return std::forward_as_tuple(
-        processPool<std::tuple_element_t<Is, RawTuple>>(
-            m_viewPools[Is], entity)...);
+        processPool<std::tuple_element_t<Is, RawTuple>>(m_viewPools[Is],
+                                                        entity)...);
   }
 
   /*
