@@ -5,14 +5,12 @@
  */
 
 #pragma once
+#include "Concepts.h"
 #include "Entity.h"
 #include <cstddef>
 #include <type_traits>
 namespace reg
 {
-
-template <typename T>
-concept ECSComponent = requires { typename T::tag; };
 
 template <typename... Components> struct CompileTimeBitMask {
 private:

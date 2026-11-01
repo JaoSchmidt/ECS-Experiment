@@ -8,6 +8,7 @@
 #include "ExcludeComponents.h"
 #include "SparseSet.h"
 #include "SparseView.h"
+#include <map>
 #include <queue>
 
 namespace reg
@@ -57,6 +58,29 @@ public:
   // ---------------------------------------------------- //
   // create
   // ---------------------------------------------------- //
+private:
+  SparseSet *getSparseSet(Bitmask b)
+  {
+    auto it = m_sparseSets.find(b);
+    if (it != m_sparseSets.end()) {
+      return &it->second;
+    }
+    return nullptr;
+  }
+  template <ECSComponent C> SparseSet &getOrCreateSparseSet()
+  {
+    Bitmask bm = getSingleBitmask<C>();
+    return m_sparseSets.try_emplace(bm, std::type_identity<C>{}).first->second;
+  }
+  template <ECSComponent C>
+  inline SparseSet &insertComp(Entity entity, C &&comp)
+  {
+    SparseSet &s = getOrCreateSparseSet<C>();
+    s.pushComponent(entity, std::forward<C>(comp));
+    return s;
+  }
+
+public:
   // Add an entity with N different components, passing using N arguments
   // This is useful to create all components at once, instead of one by one with
   // createComponent (singular)
@@ -64,37 +88,32 @@ public:
   std::tuple<Components &...> createComponents(Entity entity,
                                                Components &&...comps)
   {
-    Bitmask bitMask = getMultipleBitmask<Components...>();
+    constexpr Bitmask bitmask = getMultipleBitmask<Components...>();
+    // constexpr auto inds = std::index_sequence_for<Components...>{};
 
-    P_ASSERT(m_records.at(entity) == bitMask || m_records.at(entity) == -1,
+    P_ASSERT(m_records.at(entity) == bitmask || m_records.at(entity) == -1,
              "Component reset isn't implemented yet. TODO: need to remove "
              "component of old archetype");
 
     // Insert each component into its corresponding sparse set.
-    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-      (std::get<Is>(m_sparseSets[getSingleBitmask<Components>()])
-           .pushComponent(entity, std::forward<Components>(comps)),
-       ...);
-    }(std::index_sequence_for<Components...>{});
+    (insertComp(entity, std::forward<Components>(comps)), ...);
 
-    updateRecord(entity, bitMask);
+    updateRecord(entity, bitmask);
 
     // Return references to the inserted components.
-    return std::tie(
-        std::get<SparseSet &>(m_sparseSets[getBitmask<Components>()])
+    return std::tie<Components &...>(
+        m_sparseSets.at(getSingleBitmask<Components>())
             .template fetchComponent<Components>(entity)...);
   }
   //
-  // Attaches a component to an entity
+  // Create a single component attached into an entity
   // Old add
   template <ECSComponent Component>
   Component &createComponent(Entity entity, Component &&comp)
   {
-    Bitmask &targetBitMask = getEntityBitmask(entity);
-    SparseSet &sparseSet = m_sparseSets[targetBitMask];
-
-    sparseSet.pushComponent<Component>(entity, std::forward<Component>(comp));
-    updateRecord(entity, targetBitMask);
+    SparseSet &s = insertComp(entity, std::forward<Component>(comp));
+    updateRecord(entity, getSingleBitmask<Component>());
+    return s.fetchComponent<Component>(entity);
   }
 
   // ==================================================== //
@@ -107,9 +126,12 @@ public:
   //
   template <typename T> T &getComponent(Entity entity)
   {
-    Bitmask &targetBitMask = getEntityBitmask(entity);
-    SparseSet &sparseSet = m_sparseSets[targetBitMask];
-    return sparseSet.fetchComponent<T>(entity);
+    P_ASSERT(
+        m_records.at(entity) == getSingleBitmask<T>(),
+        "in getComponent() record bitmask and asked bitmask are different");
+
+    SparseSet &s = getOrCreateSparseSet<T>();
+    return s.fetchComponent<T>(entity);
   }
   template <ECSComponent... TargetComponents>
   std::tuple<TargetComponents &...> getComponents(Entity entity)
@@ -121,9 +143,8 @@ public:
               getMultipleBitmask<TargetComponents...>()) ==
                  getMultipleBitmask<TargetComponents...>(),
              "Entity {} does not have all components requested", entity);
-    return std::tie(
-        std::get<SparseSet &>(m_sparseSets[getBitmask<TargetComponents>()])
-            .template fetchComponent<TargetComponents>(entity)...);
+    return std::tie(m_sparseSets.at(getSingleBitmask<TargetComponents>())
+                        .template fetchComponent<TargetComponents>(entity)...);
   }
   template <ECSComponent... TargetComponents>
   std::tuple<const TargetComponents &...> getComponents(Entity entity) const
@@ -135,8 +156,7 @@ public:
               getMultipleBitmask<TargetComponents...>()) ==
                  getMultipleBitmask<TargetComponents...>(),
              "Entity {} does not have all components requested", entity);
-    return std::tie(std::get<const SparseSet &>(
-                        m_sparseSets[getBitmask<TargetComponents>()])
+    return std::tie(m_sparseSets.at(getSingleBitmask<TargetComponents>())
                         .template fetchComponent<TargetComponents>(entity)...);
   }
   // ==================================================== //
@@ -158,17 +178,16 @@ public:
 
     auto processComponent = [&]<ECSComponent C>(C &&comp) {
       if ((getSingleBitmask<C>() & removables) != 0) {
-        m_sparseSets[getSingleBitmask<C>()].remove(entity);
+        getOrCreateSparseSet<C>().remove(entity);
       } else {
-        m_sparseSets[getSingleBitmask<C>()].pushComponent(
-            entity, std::forward<C>(comp));
+        getOrCreateSparseSet<C>().pushComponent(entity, std::forward<C>(comp));
       }
     };
 
     (processComponent(std::forward<Components>(comps)), ...);
 
     return std::tie(
-        std::get<SparseSet &>(m_sparseSets[getBitmask<Components>()])
+        std::get<SparseSet &>(m_sparseSets.at(getSingleBitmask<Components>()))
             .template fetchComponent<Components>(entity)...);
   }
 
@@ -177,26 +196,32 @@ public:
   template <ECSComponent C>
   void manualPush(Entity entity, Bitmask bitmask, C &&comp)
   {
+#ifdef NDEBUG
+    UNUSED(bitmask)
+#endif
     P_ASSERT((bitmask & getSingleBitmask<C>()) == getSingleBitmask<C>(),
              "manual push require the same bitmasks");
-    m_sparseSets[getSingleBitmask<C>()].pushComponent(entity,
-                                                      std::forward<C>(comp));
+    getOrCreateSparseSet<C>().pushComponent(entity, std::forward<C>(comp));
   }
 
   // ==================================================== //
   // iterate chunks
   // ==================================================== //
 private:
-  template <typename C> inline SparseSet *processComp()
+  template <ECSComponent... Cs, std::size_t... Is>
+  inline void createConstArr(std::array<const SparseSet *, sizeof...(Cs)> &arr,
+                             std::index_sequence<Is...>)
   {
-    return &m_sparseSets[getSingleBitmask<C>()];
+    ((arr[Is] =
+          &getOrCreateSparseSet<std::tuple_element_t<Is, std::tuple<Cs...>>>()),
+     ...);
   }
-
-  template <typename... Cs, std::size_t... Is>
+  template <ECSComponent... Cs, std::size_t... Is>
   inline void createArr(std::array<SparseSet *, sizeof...(Cs)> &arr,
                         std::index_sequence<Is...>)
   {
-    ((arr[Is] = processComp<std::tuple_element_t<Is, std::tuple<Cs...>>>()),
+    ((arr[Is] =
+          &getOrCreateSparseSet<std::tuple_element_t<Is, std::tuple<Cs...>>>()),
      ...);
   }
 
@@ -204,15 +229,30 @@ public:
   template <ECSComponent... Components, ECSComponent... ExcludeComponents>
   View<Components...> view(exclude_t<ExcludeComponents...> = {})
   {
-    int excludeBitMask = getMultipleBitmask<ExcludeComponents...>();
-    // for each component, extract the target vectors of that component in each
-    // Archetype (SoA), then get its address (ChunkView)
+    Bitmask excludeBitMask = getMultipleBitmask<ExcludeComponents...>();
+    Bitmask requiredBitMask = getMultipleBitmask<Components...>();
+    // for each component, extract the target sparse set
 
     constexpr auto indexes = std::index_sequence_for<Components...>{};
     std::array<SparseSet *, sizeof...(Components)> arr;
     createArr<Components...>(arr, indexes);
 
-    return View<Components...>(m_records, arr, excludeBitMask);
+    return View<Components...>(m_records, std::move(arr), requiredBitMask,
+                               excludeBitMask);
+  }
+  template <ECSComponent... Components, ECSComponent... ExcludeComponents>
+  View<const Components...> viewConst(exclude_t<ExcludeComponents...> = {})
+  {
+    Bitmask excludeBitMask = getMultipleBitmask<ExcludeComponents...>();
+    Bitmask requiredBitMask = getMultipleBitmask<Components...>();
+    // for each component, extract the target sparse set
+
+    constexpr auto indexes = std::index_sequence_for<Components...>{};
+    std::array<const SparseSet *, sizeof...(Components)> arr;
+    createConstArr<Components...>(arr, indexes);
+
+    return View<const Components...>(m_records, std::move(arr), requiredBitMask,
+                                     excludeBitMask);
   }
 
 public:
@@ -225,7 +265,7 @@ public:
   {
     Bitmask targetBitMask = m_records[entity.size_type()];
     int objectBitMask = getMultipleBitmask<ObjectComponents...>();
-    return (targetBitMask | objectBitMask) == objectBitMask;
+    return (targetBitMask & objectBitMask) == objectBitMask;
   }
   // Targeted has at least one component that a specific archetype also has
   template <ECSComponent... TargetComponents> bool hasAny(Entity entity) const
@@ -258,10 +298,13 @@ public:
   // Deletes an active entity and its associated components.
   void remove(Entity &entity)
   {
-    Bitmask &targetBitMask = getEntityBitmask(entity);
-    SparseSet &sparseSet = m_sparseSets.at(targetBitMask);
+    for (Bitmask i = Bitmask{1}; i.value < getMaxComp();
+         i.value = i.value << 1) {
+      SparseSet *sparseSet = getSparseSet(i);
+      if (sparseSet)
+        sparseSet->remove(entity);
+    }
 
-    sparseSet.remove(entity);
     m_records[entity.size_type()] = Bitmask{-1};
     m_availableEntities.push(entity);
   }
@@ -272,7 +315,12 @@ public:
 
 private:
   // Bitmask related
+  static constexpr std::size_t getMaxComp()
+  {
+    return ComponentManagerT::getNumberOfRegisteredComponents();
+  }
   template <ECSComponent... Components>
+
   static constexpr Bitmask getMultipleBitmask()
   {
     return ComponentManagerT::template multiComponentBitmask<Components...>();

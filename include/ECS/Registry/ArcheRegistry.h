@@ -68,8 +68,8 @@ public:
                                                Components &&...comps)
   {
     Bitmask bitMask = getMultipleBitmask<Components...>();
-    P_ASSERT(m_records.at(entity).bitmask == bitMask ||
-                 m_records.at((size_t)entity).bitmask == -1,
+    P_ASSERT(m_records.at(entity.size_type()).bitmask == bitMask ||
+                 m_records.at(entity.size_type()).bitmask == -1,
              "Component reset isn't implemented yet. TODO: need to remove "
              "component of old archetype");
     Archetype &archetype =
@@ -199,7 +199,7 @@ public:
       chunks.emplace_back(chunk);
     }
 
-    return chunks;
+    return std::move(chunks);
   }
   template <ECSComponent... Components, ECSComponent... ExcludeComponents>
   std::vector<ChunkViewConst<const Components...>>
@@ -225,7 +225,7 @@ public:
       chunks.emplace_back(chunk);
     }
 
-    return chunks;
+    return std::move(chunks);
   }
   // ==================================================== //
   // size
@@ -294,7 +294,7 @@ public:
   {
     Bitmask targetBitMask = m_records[entity.size_type()].bitmask;
     int objectBitMask = getMultipleBitmask<ObjectComponents...>();
-    return (targetBitMask | objectBitMask) == objectBitMask;
+    return (targetBitMask & objectBitMask) == objectBitMask;
   }
   // Targeted has at least one component that a specific archetype also has
   template <ECSComponent... TargetComponents> bool hasAny(Entity entity) const
@@ -418,7 +418,7 @@ private:
   }
   void addRecord(Bitmask bitmask, size_t row)
   {
-    m_records.emplace_back(bitmask, Row{row});
+    m_records.emplace_back(bitmask, Row::from_size(row));
   }
   void updateRecord(Entity entity, Bitmask bitmask, Row row)
   {
@@ -426,7 +426,7 @@ private:
   }
   void updateRecord(Entity entity, Bitmask bitmask, size_t row)
   {
-    m_records[entity.size_type()] = {bitmask, Row{row}};
+    m_records[entity.size_type()] = {bitmask, Row::from_size(row)};
   }
 };
 } // namespace reg

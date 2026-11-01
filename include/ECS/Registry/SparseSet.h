@@ -1,5 +1,11 @@
 #pragma once
+#include "CoreFiles/LogWrapper.h"
+#include "ECS/Registry/Concepts.h"
 #include "Entity.h"
+#include <functional>
+#include <memory>
+#include <type_traits>
+#include <vector>
 
 //
 // A templated sparse set implementation, mapping EntityIndex -> T
@@ -35,7 +41,7 @@ private:
   using AutoDeleteVector = std::unique_ptr<void, Deleter>;
   // Holds actual (component) data, tightly packed
   AutoDeleteVector m_dense;
-  std::function<Entity(Entity)> m_remover;
+  std::function<void(Entity)> m_remover;
   std::function<void(void)> m_clearer;
   std::function<size_t(void)> m_size;
 
@@ -48,8 +54,8 @@ private:
   //
   inline void setSparseIndex(Entity entity_index, size_t dense_index)
   {
-    if (entity_index >= m_sparse.size())
-      m_sparse.resize(entity_index + 1, tombstone);
+    if (entity_index.size_type() >= m_sparse.size())
+      m_sparse.resize(entity_index.size_type() + 1, tombstone);
     m_sparse[entity_index] = Entity(dense_index);
   }
 
@@ -65,40 +71,47 @@ private:
   }
   template <typename C> inline std::vector<C> &getDenseVec()
   {
-    return *static_cast<std::vector<C> *>(m_dense);
+    return *static_cast<std::vector<C> *>(m_dense.get());
   }
-
-public:
-  template <typename C>
-  SparseSet()
-      : m_remover(
-            [this](Entity entity) { return removeFromComponent<C>(entity); }),
-        m_clearer([this]() { getDenseVec<C>().clear(); }),
-        m_size([this]() { return getDenseVec<C>().size(); })
+  template <typename C> inline const std::vector<C> &getDenseVec() const
   {
-    auto deleter = [](void *vector) {
-      delete static_cast<std::vector<C> *>(vector);
-    };
-    constexpr size_t BUFFER_ELEMENT_RESERVE_SIZE = 1000; // no. elements
-    m_sparse.reserve(BUFFER_ELEMENT_RESERVE_SIZE);
-    m_dense = AutoDeleteVector{new std::vector<C>(), deleter};
-
-    getDense<C>().reserve(BUFFER_ELEMENT_RESERVE_SIZE);
-
-    m_entities.reserve(BUFFER_ELEMENT_RESERVE_SIZE);
+    return *static_cast<std::vector<C> *>(m_dense.get());
   }
+
+  // private:
+public:
+  template <ECSComponent C>
+  SparseSet(std::type_identity<C>)
+      : m_dense(AutoDeleteVector{new std::vector<C>(), //
+                                 [](void *vector) {
+                                   delete static_cast<std::vector<C> *>(vector);
+                                 }}),
+        m_remover([this](Entity entity) { removeFromComponent<C>(entity); }),
+        m_clearer([this]() {
+          static_cast<std::vector<C> *>(m_dense.get())->clear();
+        }),
+        m_size([this]() {
+          return static_cast<std::vector<C> *>(m_dense.get())->size();
+        })
+
+  {};
+
+  // if copied or moved, every lambda will have "this" as dangling
+  NONCOPYABLE(SparseSet);
+  NONMOVABLE(SparseSet);
+  SparseSet() = delete;
+
   //
   // Upserts into the dense list such that:
   // m_dense[m_sparse[entity_index]] == C
   // Old "set"
-  template <typename C, typename... Args>
-  C &pushComponent(Entity entity, Args &&...args)
+  template <typename C> C &pushComponent(Entity entity, C &&comp)
   {
     Entity index = getDenseIndex(entity);
     std::vector<C> &dense = getDenseVec<C>();
     // Overwrite if data exists
     if (index != tombstone) {
-      dense[index] = C{std::forward<Args>(args)...};
+      dense[index] = std::forward<C>(comp);
       return dense[index];
     }
 
@@ -106,7 +119,7 @@ public:
     setSparseIndex(entity, dense.size());
 
     // Push data to the back of the dense list
-    dense.emplace_back(std::forward<Args>(args)...);
+    dense.push_back(std::forward<C>(comp));
     m_entities.push_back(entity);
 
     return dense.back();
@@ -125,8 +138,18 @@ public:
              dense.size());
     return dense[index];
   }
-  Entity remove(Entity entity) { return m_remover(entity); }
-  size_t size() { return m_size(); }
+  template <typename C> const C &fetchComponent(Entity entity) const
+  {
+    Entity index = getDenseIndex(entity);
+    const std::vector<C> &dense = getDenseVec<C>();
+    P_ASSERT((unsigned)index < dense.size(),
+             "Entity index {} out of range on array of size {}", entity.value,
+             dense.size());
+    return dense[index];
+  }
+  void remove(Entity entity) { m_remover(entity); }
+  inline size_t size() { return m_size(); }
+  inline size_t size() const { return m_size(); }
 
   //
   // Removes data from the dense list, and sets the sparse index to a tombstone
@@ -134,7 +157,7 @@ public:
   template <typename C> void removeFromComponent(Entity entity)
   {
     Entity deleted_dense_index = getDenseIndex(entity);
-    std::vector<C> dense = getDenseVec<C>();
+    std::vector<C> &dense = *static_cast<std::vector<C> *>(m_dense.get());
 
     if (dense.empty() || deleted_dense_index == tombstone)
       return;
@@ -147,7 +170,7 @@ public:
     // Swap and pop: Swap deleted index with back element, then pop off the back
     // of the dense list. An O(1) operation; at the cost of no strict dense
     // ordering
-    std::swap(dense.back(), m_remover(deleted_dense_index));
+    std::swap(dense.back(), dense[deleted_dense_index]);
     std::swap(m_entities.back(), m_entities[deleted_dense_index]);
 
     dense.pop_back();
@@ -167,7 +190,8 @@ public:
   {
     return getDenseIndex(entity_index) != tombstone;
   }
-  std::vector<Entity> getEntities() { return m_entities; };
+  std::vector<Entity> getEntities() { return m_entities; }
+  const std::vector<Entity> &getEntities() const { return m_entities; }
 
   void clear()
   {
@@ -179,7 +203,7 @@ public:
   //
   // Read-only dense list
   //
-  template <typename C> const std::vector<C> &data() const
+  template <typename C> const C *data() const
   {
     return getDenseVec<C>().data();
   }
