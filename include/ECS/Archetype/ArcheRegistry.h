@@ -22,11 +22,31 @@ template <typename... Components> struct ChunkView {
   std::tuple<Components *...> arrays = {};
   std::vector<reg::Entity> &entities;
   size_t count = 0;
+  ChunkView(std::tuple<Components *...> arrays_,
+            std::vector<reg::Entity> &entities_, size_t count_)
+      : arrays(arrays_), entities(entities_), count(count_)
+  {
+  }
+  ChunkView(const ChunkView &o) = delete;
+  ChunkView &operator=(const ChunkView &o) = delete;
+  // std::vector needs this to grow. There's no move assignment because of the
+  // reference member
+  ChunkView(ChunkView &&o) = default;
 };
 template <typename... Components> struct ChunkViewConst {
   std::tuple<Components *...> arrays = {};
   const std::vector<reg::Entity> &entities;
   size_t count;
+  ChunkViewConst(std::tuple<Components *...> arrays_,
+                 const std::vector<reg::Entity> &entities_, size_t count_)
+      : arrays(arrays_), entities(entities_), count(count_)
+  {
+  }
+  ChunkViewConst(const ChunkViewConst &o) = delete;
+  ChunkViewConst &operator=(const ChunkViewConst &o) = delete;
+  // std::vector needs this to grow. There's no move assignment because of the
+  // reference member
+  ChunkViewConst(ChunkViewConst &&o) = default;
 };
 
 template <typename ComponentManagerT>
@@ -192,14 +212,13 @@ public:
       if ((mask & excludeBitMask) != 0)
         continue;
 
-      ChunkView<Components...> chunk{
+      chunks.emplace_back(
           std::tuple<Components *...>{
               archetype.getComponent<Components>().data()...},
-          archetype.m_entities, archetype.m_entities.size()};
-      chunks.emplace_back(chunk);
+          archetype.m_entities, archetype.m_entities.size());
     }
 
-    return std::move(chunks);
+    return chunks;
   }
   template <ECSComponent... Components, ECSComponent... ExcludeComponents>
   std::vector<ChunkViewConst<const Components...>>
@@ -217,15 +236,13 @@ public:
       if ((mask & excludeBitMask) != 0)
         continue;
 
-      ChunkViewConst<const Components...> chunk{
+      chunks.emplace_back(
           std::tuple<const Components *...>{
               std::as_const(archetype).getComponent<Components>().data()...},
-          archetype.m_entities, archetype.m_entities.size()};
-
-      chunks.emplace_back(chunk);
+          archetype.m_entities, archetype.m_entities.size());
     }
 
-    return std::move(chunks);
+    return chunks;
   }
   // ==================================================== //
   // size
