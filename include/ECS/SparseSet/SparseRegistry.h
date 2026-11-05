@@ -6,6 +6,7 @@
 #endif
 #include "ECS/Entity.h"
 #include "ECS/ExcludeComponents.h"
+#include "Group.h"
 #include "SparseSet.h"
 #include "SparseView.h"
 #include <map>
@@ -18,28 +19,27 @@ template <typename ComponentManagerT>
   requires(is_compile_time_bitmask_v<ComponentManagerT>)
 class SparseRegistry
 {
+  friend struct GroupData;
+
 private:
   template <typename...> friend class SimpleView;
 
-  //
-  // List of EntityIndexes already created, but no longer in use; to be recycled
-  //
+  /// List of EntityIndexes already created, but no longer in use; to be
+  /// recycled
   std::queue<Entity> m_availableEntities = {};
 
-  //
-  // Maps Entity -> Bitmask (1:1)
-  // - Make sure info here is needed per-entity; if data is sparse, use a
-  // SparseSet for that info instead.
-  //
+  /** Maps Entity -> Bitmask (1:1)
+  - Make sure info here is needed per-entity; if data is sparse, use a
+  SparseSet for that info instead.**/
   std::vector<Bitmask> m_records;
 
-  // Holds generic pointers to specific component sparse sets.
+  /// Holds generic pointers to specific component sparse sets.
   std::map<Bitmask, SparseSet> m_sparseSets;
 
-  //
-  // Highest recorded EntityIndexm should not exceed MAX_ENTITIES
-  //
+  /// Highest recorded EntityIndexm should not exceed MAX_ENTITIES
   std::int32_t numberOfEntities = Entity{-1};
+
+  std::map<std::pair<Bitmask, Bitmask>, GroupData> m_groups;
 
 public:
   SparseRegistry() : m_sparseSets() {};
@@ -185,6 +185,8 @@ public:
     };
 
     (processComponent(std::forward<Components>(comps)), ...);
+    updateRecord(entity, newBitMask);
+    onRecordChange(entity, oldBitmask, newBitMask);
 
     return std::tie(
         std::get<SparseSet &>(m_sparseSets.at(getSingleBitmask<Components>()))
@@ -204,6 +206,50 @@ public:
     getOrCreateSparseSet<C>().pushComponent(entity, std::forward<C>(comp));
   }
 
+  // ==================================================== //
+  // group
+  // ==================================================== //
+
+public:
+  template <ECSComponent... Cs, ECSComponent... Exc>
+  GroupData &group(exclude_t<Exc...> = {})
+  {
+    constexpr Bitmask owned = getMultipleBitmask<Cs...>();
+    constexpr Bitmask excluded = getMultipleBitmask<Exc...>();
+    std::pair<Bitmask, Bitmask> key = {owned, excluded};
+    auto it = m_groups.find(key);
+    if (it != m_groups.end()) {
+      return it->second;
+    }
+    auto [inserted, isInserted] = m_groups.emplace(
+        key, GroupData(owned, excluded, 0, {&getOrCreateSparseSet<Cs>()...}));
+
+    P_ASSERT(isInserted, "Could not insert GroupData inside SparseRegistry");
+    GroupData &g = inserted->second;
+    Bitmask first = getFirstBitmask<Cs...>();
+    for (Entity e : g.m_pools[first]->getEntities()) {
+      if (g.matches(getEntityBitmask(e)))
+        g.template enter<Cs...>(e);
+    }
+    return g;
+  }
+
+  void onRecordChange(Entity e, Bitmask oldRec, Bitmask newRec)
+  {
+    // records use -1 for "empty/dead"; treat it as "no components"
+    if (oldRec == -1)
+      oldRec = Bitmask{0};
+    if (newRec == -1)
+      newRec = Bitmask{0};
+    for (auto &pair : m_groups) {
+      GroupData &g = pair.second;
+      const bool was = g.matches(oldRec), is = g.matches(newRec);
+      if (!was && is)
+        g.enter(e);
+      else if (was && !is)
+        g.leave(e);
+    }
+  }
   // ==================================================== //
   // iterate chunks
   // ==================================================== //
@@ -326,6 +372,11 @@ private:
     return ComponentManagerT::template multiComponentBitmask<Components...>();
   }
   template <ECSComponent Component> static constexpr Bitmask getSingleBitmask()
+  {
+    return ComponentManagerT::template singleComponentBitmask<Component>();
+  }
+  template <ECSComponent Component, typename... other>
+  static constexpr Bitmask getFirstBitmask()
   {
     return ComponentManagerT::template singleComponentBitmask<Component>();
   }

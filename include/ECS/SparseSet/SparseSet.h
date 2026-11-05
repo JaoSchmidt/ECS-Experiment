@@ -59,6 +59,7 @@ private:
     m_sparse[entity_index] = Entity(dense_index);
   }
 
+public:
   //
   // Returns the dense index for a given EntityIndex,
   // or a tombstone (null) value if non-existent
@@ -78,8 +79,6 @@ private:
     return *static_cast<std::vector<C> *>(m_dense.get());
   }
 
-  // private:
-public:
   template <ECSComponent C>
   SparseSet(std::type_identity<C>)
       : m_dense(AutoDeleteVector{new std::vector<C>(), //
@@ -206,6 +205,17 @@ public:
   template <typename C> const C *data() const
   {
     return getDenseVec<C>().data();
+  }
+
+  template <typename C> void swapDense(std::size_t a, std::size_t b)
+  {
+    if (a == b)
+      return;
+    std::vector<C> &dense = getDenseVec<C>();
+    std::swap(dense[a], dense[b]);
+    std::swap(m_entities[a], m_entities[b]);
+    setSparseIndex(m_entities[a], a);
+    setSparseIndex(m_entities[b], b);
   }
 };
 } // namespace reg
